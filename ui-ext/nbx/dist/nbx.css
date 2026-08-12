@@ -228,3 +228,173 @@
         min-height: 44px;
     }
 }
+
+/* ============================================================
+   NextBase (nbx) P3 — dashboards, reports & PDF
+   ============================================================ */
+
+.nbx-dashboard {
+    min-height: 50vh;
+}
+
+.nbx-widgets-grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 1rem;
+    /* container queries for per-widget responsiveness */
+    container-type: inline-size;
+}
+
+.nbx-widget {
+    background: var(--contentColor);
+    border: 1px solid var(--borderColor);
+    border-radius: 6px;
+    padding: 1rem;
+    min-width: 0;
+    min-height: 3rem;
+}
+
+.nbx-widget.span-1 { grid-column: span 1; }
+.nbx-widget.span-2 { grid-column: span 2; }
+.nbx-widget.span-3 { grid-column: span 3; }
+.nbx-widget.span-4 { grid-column: span 4; }
+.nbx-widget.span-5 { grid-column: span 5; }
+.nbx-widget.span-6 { grid-column: span 6; }
+.nbx-widget.span-7 { grid-column: span 7; }
+.nbx-widget.span-8 { grid-column: span 8; }
+.nbx-widget.span-9 { grid-column: span 9; }
+.nbx-widget.span-10 { grid-column: span 10; }
+.nbx-widget.span-11 { grid-column: span 11; }
+.nbx-widget.span-12 { grid-column: span 12; }
+
+.nbx-widget-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+    border-bottom: 1px solid var(--borderColor);
+    padding-bottom: 0.5rem;
+}
+.nbx-widget-title {
+    font-weight: 600;
+}
+
+/* -- kpi -- */
+.nbx-widget-kpi {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+.nbx-kpi-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--accentColor);
+    line-height: 1;
+}
+
+/* -- text -- */
+.nbx-text-content p {
+    margin: 0 0 0.5rem;
+}
+.nbx-text-content p:last-child {
+    margin-bottom: 0;
+}
+
+/* -- table -- */
+.nbx-widget-table .page-table-wrapper {
+    overflow-x: auto;
+}
+
+/* -- chart -- */
+.nbx-widget-chart,
+.nbx-widget-map {
+    position: relative;
+    min-height: 220px;
+}
+.nbx-widget-chart-loader,
+.nbx-widget-map-loader {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 220px;
+    color: var(--mutedColor);
+}
+.nbx-widget-chart-empty,
+.nbx-widget-map-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 220px;
+    color: var(--mutedColor);
+    text-align: center;
+    padding: 1rem;
+}
+.nbx-widget-map .leaflet-container {
+    width: 100%;
+    height: 300px;
+    border-radius: 4px;
+    z-index: 0;
+}
+
+/* -- report compose page -- */
+.nbx-report-page {
+    min-height: 50vh;
+}
+.nbx-report-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+.nbx-report-head h2 {
+    margin: 0;
+}
+.nbx-report-head-actions {
+    display: inline-flex;
+    gap: 0.5rem;
+}
+
+/* -- widget editor modal -- */
+.nbx-dash-report-editor .nbx-widget-row {
+    border: 1px solid var(--borderColor);
+    border-radius: 5px;
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+    background: var(--baseColor);
+}
+
+/* -- responsive (F10) -- */
+@media (width <= 900px) {
+    .nbx-widget.span-7,
+    .nbx-widget.span-8,
+    .nbx-widget.span-9,
+    .nbx-widget.span-10,
+    .nbx-widget.span-11,
+    .nbx-widget.span-12 {
+        grid-column: span 12;
+    }
+}
+@media (width <= 600px) {
+    .nbx-widgets-grid {
+        grid-template-columns: 1fr;
+    }
+    .nbx-widget.span-1,
+    .nbx-widget.span-2,
+    .nbx-widget.span-3,
+    .nbx-widget.span-4,
+    .nbx-widget.span-5,
+    .nbx-widget.span-6,
+    .nbx-widget.span-7,
+    .nbx-widget.span-8,
+    .nbx-widget.span-9,
+    .nbx-widget.span-10,
+    .nbx-widget.span-11,
+    .nbx-widget.span-12 {
+        grid-column: span 1;
+    }
+    .nbx-widget-map .leaflet-container {
+        height: 240px;
+    }
+}

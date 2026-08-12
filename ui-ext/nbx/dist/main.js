@@ -704,12 +704,732 @@ window.app.components.nbxWorkspace = function(propsArg = {}) {
                 ),
             ),
         ),
+        app.components.nbxReportsSection({}),
     );
 };
 
-// ---------------------------------------------------------------------------
-// routes + nav
-// ---------------------------------------------------------------------------
+// NextBase (nbx) P3 — Dashboards, reports & PDF.
+//
+// Dashboard widgets (kpi/table/chart/text/map), report pages and their PDF
+// export are rendered here on top of the server-evaluated widget payload from
+// GET /api/nbx/dashboards/{id}/widgets (KPI values/table rows are computed
+// server-side; interactive charts/maps use the global uPlot/Leaflet).
+
+const NbxDashboardsCollection = "_dashboards";
+const NbxReportsCollection = "_reports";
+
+const NbxWidgetTypes = [
+    { value: "kpi", label: "KPI" },
+    { value: "table", label: "Data table" },
+    { value: "chart", label: "Chart" },
+    { value: "text", label: "Text" },
+    { value: "map", label: "Map" },
+];
+
+async function nbxLoadDashboards() {
+    const result = await app.pb.collection(NbxDashboardsCollection).getList(1, 200, {
+        sort: "created",
+        requestKey: "nbx.loadDashboards",
+    });
+    return result.items;
+}
+
+async function nbxLoadReports() {
+    const result = await app.pb.collection(NbxReportsCollection).getList(1, 200, {
+        sort: "created",
+        requestKey: "nbx.loadReports",
+    });
+    return result.items;
+}
+
+// fetch the server-evaluated widget data for a dashboard
+async function nbxFetchWidgets(dashboardId) {
+    const res = await app.pb.send("/api/nbx/dashboards/" + dashboardId + "/widgets", {
+        method: "GET",
+        requestKey: "nbx.dashboardWidgets",
+    });
+    return res || { data: [] };
+}
+
+// KPI display value for a widget based on its aggregate + kpi payload
+function nbxKpiDisplay(widget, kpi) {
+    if (!kpi) {
+        return "—";
+    }
+    switch (widget.aggregate || "count") {
+        case "sum":
+            return kpi.sum != null ? kpi.sum.toLocaleString() : "—";
+        case "avg":
+            return kpi.avg != null ? kpi.avg.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—";
+        case "min":
+            return kpi.min != null ? kpi.min.toLocaleString() : "—";
+        case "max":
+            return kpi.max != null ? kpi.max.toLocaleString() : "—";
+        default:
+            return kpi.count != null ? kpi.count.toLocaleString() : "—";
+    }
+}
+
+// --- map widget (OSM multi-marker via the global Leaflet) -------------------
+function nbxMapWidget(data) {
+    const table = data.table?.rows || [];
+    const points = table
+        .map((row) => ({
+            title: row[0],
+            lat: parseFloat((row[1] || "").replace(",", ".")),
+            lon: parseFloat((row[2] || "").replace(",", ".")),
+        }))
+        .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+
+    return t.div(
+        {
+            className: "nbx-widget-map",
+            onmount(el) {
+                if (!window.L || !points.length) {
+                    el.appendChild(
+                        t.div({ className: "nbx-widget-map-empty" }, points.length ? "Maps are unavailable in this browser." : "No geo data to render."),
+                    );
+                    return;
+                }
+                const map = L.map(el, { zoomControl: true }).setView([points[0].lat, points[0].lon], 4);
+                L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+                    maxZoom: 19,
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                }).addTo(map);
+
+                points.forEach((p) => {
+                    const marker = L.marker([p.lat, p.lon]).addTo(map);
+                    if (p.title) {
+                        marker.bindPopup(p.title);
+                    }
+                });
+
+                if (points.length > 1) {
+                    map.fitBounds(points.map((p) => [p.lat, p.lon]));
+                }
+
+                el._nbxMap = map;
+            },
+            onunmount(el) {
+                el._nbxMap?.remove();
+            },
+        },
+        t.div({ className: "nbx-widget-map-loader" }, t.span({ className: "loader sm" })),
+    );
+}
+
+// --- chart widget (uPlot bar/line from table payload) -----------------------
+function nbxChartWidget(data, title) {
+    const columns = data.table?.columns || [];
+    const rows = data.table?.rows || [];
+
+    return t.div(
+        {
+            className: "nbx-widget-chart",
+            onmount(el) {
+                if (!window.uPlot || !rows.length) {
+                    el.appendChild(t.div({ className: "nbx-widget-chart-empty" }, rows.length ? "Charts are unavailable in this browser." : "No numeric data to chart."));
+                    return;
+                }
+
+                const xCol = columns[0] || "x";
+                const yCol = columns.length > 1 ? columns[1] : columns[0] || "y";
+
+                const xs = rows.map((_, i) => i);
+                const ys = rows.map((row) => {
+                    const v = parseFloat(String(row[columns.length > 1 ? 1 : 0] || "").replace(",", "."));
+                    return Number.isFinite(v) ? v : 0;
+                });
+
+                const opts = {
+                    width: el.clientWidth || 320,
+                    height: 220,
+                    legend: { show: true },
+                    scales: { x: { time: false }, y: { min: 0 } },
+                    series: [
+                        {},
+                        {
+                            label: yCol,
+                            stroke: "var(--accentColor)",
+                            width: 2,
+                            fill: "rgba(16,85,201,0.15)",
+                            points: { show: false },
+                        },
+                    ],
+                    axes: [
+                        {
+                            values: (self, ticks) => ticks.map((i) => rows[i]?.[0] ?? ""),
+                            ticks: { size: 4 },
+                            grid: { show: true },
+                        },
+                        { grid: { show: true } },
+                    ],
+                };
+                el._nbxUplot = new uPlot(opts, [xs, ys], el);
+            },
+            onunmount(el) {
+                el._nbxUplot?.destroy();
+            },
+        },
+        t.div({ className: "nbx-widget-chart-loader" }, t.span({ className: "loader sm" })),
+    );
+}
+
+// --- table widget ------------------------------------------------------------
+function nbxTableWidget(data) {
+    const columns = data.table?.columns || [];
+    const rows = data.table?.rows || [];
+    if (!columns.length) {
+        return t.p({ className: "empty-state" }, "No data.");
+    }
+    return t.div(
+        { className: "page-table-wrapper" },
+        t.table(
+            { className: "responsive-table" },
+            t.thead(
+                t.tr(columns.map((c) => t.th(c))),
+            ),
+            t.tbody(
+                rows.map((row) =>
+                    t.tr(row.map((cell, i) => t.td({ "html-data-name": columns[i] }, cell != null ? String(cell) : ""))),
+                ),
+            ),
+        ),
+    );
+}
+
+// --- single dashboard widget renderer ---------------------------------------
+function nbxWidgetView(entry) {
+    const widget = entry.widget || {};
+    const cls = ["nbx-widget", "nbx-widget-" + (widget.type || "text")];
+    const span = Math.min(12, Math.max(1, widget.span || 4));
+    cls.push("span-" + span);
+
+    const body = () => {
+        if (entry.error) {
+            return t.p({ className: "empty-state" }, "Widget error: " + entry.error);
+        }
+        switch (widget.type) {
+            case "kpi":
+                return t.div({ className: "nbx-kpi-value" }, nbxKpiDisplay(widget, entry.kpi));
+            case "table":
+                return nbxTableWidget(entry);
+            case "chart":
+                return nbxChartWidget(entry, widget.title);
+            case "map":
+                return nbxMapWidget(entry);
+            case "text":
+            default:
+                return t.div({ className: "nbx-text-content" }, (entry.notes || []).map((line) => t.p(line)));
+        }
+    };
+
+    return t.div(
+        { className: cls.join(" ") },
+        widget.type == "spacer"
+            ? null
+            : t.div({ className: "nbx-widget-head" }, t.span({ className: "nbx-widget-title" }, widget.title || "")),
+        body(),
+    );
+}
+
+// --- dashboard component ----------------------------------------------------
+window.app.components.nbxDashboard = function(propsArg = {}) {
+    const props = store({ dashboard: {}, widgets: [], isLoading: false });
+
+    const watchers = app.utils.extendStore(props, propsArg);
+
+    async function load() {
+        if (!props.dashboard?.id) {
+            props.widgets = [];
+            return;
+        }
+        props.isLoading = true;
+        try {
+            const payload = await nbxFetchWidgets(props.dashboard.id);
+            props.widgets = payload.data || [];
+        } catch (err) {
+            if (!err.isAbort) {
+                app.checkApiError(err);
+            }
+        } finally {
+            props.isLoading = false;
+        }
+    }
+
+    watch(() => props.dashboard?.id, () => load());
+    watchers?.push(watch(() => props.reloadKey, () => load()));
+
+    return t.div(
+        { className: "nbx-dashboard" },
+        () => {
+            if (props.isLoading) {
+                return t.div({ className: "block txt-center" }, t.span({ className: "loader lg" }));
+            }
+            if (!props.widgets.length) {
+                return t.p({ className: "empty-state" }, "This dashboard has no widgets yet.");
+            }
+            return t.div(
+                { className: "nbx-widgets-grid" },
+                props.widgets.map((entry) => nbxWidgetView(entry)),
+            );
+        },
+    );
+};
+
+// --- dashboard & report editor modal -----------------------------------------
+function nbxDashboardReportModal(kind, record = null, dashboards = []) {
+    const uniqueId = "nbx_dashboard_report_editor_" + app.utils.randomString();
+    const isDashboard = kind == "dashboard";
+    const collectionName = isDashboard ? NbxDashboardsCollection : NbxReportsCollection;
+
+    const data = store({
+        isNew: !record?.id,
+        label: record?.label || "",
+        dashboard: record?.dashboard || dashboards[0]?.id || "",
+        config: nbxJSON(record?.config),
+        widgets: isDashboard
+            ? (nbxJSON(record?.config)?.widgets || [])
+            : [],
+    });
+
+    let modal;
+    let result = null;
+    let resolveClose;
+
+    async function save(ev) {
+        ev?.preventDefault();
+        if (!data.label) {
+            app.toasts.error("Please provide a label.");
+            return;
+        }
+        if (isDashboard) {
+            data.config.widgets = data.widgets;
+        } else if (!data.dashboard) {
+            app.toasts.error("Please select a dashboard.");
+            return;
+        }
+
+        try {
+            const payload = { label: data.label, config: data.config };
+            if (!isDashboard) {
+                payload.dashboard = data.dashboard;
+            }
+            const collection = app.pb.collection(collectionName);
+            result = data.isNew ? await collection.create(payload) : await collection.update(record.id, payload);
+            app.toasts.success("Saved.");
+            app.modals.close(modal, true);
+            return result;
+        } catch (err) {
+            app.checkApiError(err);
+            return null;
+        }
+    }
+
+    // add a default widget row for dashboards
+    function addWidget() {
+        data.widgets.push({
+            type: "kpi",
+            title: "New metric",
+            source: "",
+            aggregate: "count",
+            span: 4,
+        });
+    }
+
+    modal = t.div(
+        {
+            id: uniqueId,
+            className: "modal nbx-dash-report-editor",
+            onafterclose: (el) => {
+                el?.remove();
+                resolveClose?.(result);
+            },
+            onunmount: () => {},
+        },
+        t.header(
+            { className: "modal-header" },
+            t.h6({ className: "modal-title" }, data.isNew ? (isDashboard ? "Create dashboard" : "Create report") : (isDashboard ? "Edit dashboard" : "Edit report")),
+        ),
+        t.div(
+            { className: "modal-content" },
+            t.form(
+                { className: "grid", onsubmit: save },
+                t.div(
+                    { className: "col-12" },
+                    t.label({ for: uniqueId + "_label" }, "Label"),
+                    t.input({
+                        id: uniqueId + "_label",
+                        type: "text",
+                        value: () => data.label,
+                        oninput: (ev) => (data.label = ev.target.value),
+                    }),
+                ),
+                isDashboard
+                    ? null
+                    : t.div(
+                          { className: "col-12" },
+                          t.label({ for: uniqueId + "_dash" }, "Dashboard"),
+                          app.components.select({
+                              id: uniqueId + "_dash",
+                              required: true,
+                              value: () => data.dashboard,
+                              options: dashboards.map((d) => ({ value: d.id, label: d.label || d.id })),
+                              onchange: (sel) => (data.dashboard = sel?.[0]?.value || ""),
+                          }),
+                      ),
+                isDashboard
+                    ? t.div(
+                          { className: "col-12" },
+                          t.div(
+                              { className: "flex m-b-sm" },
+                              t.span({ className: "txt-sm muted" }, "Widgets"),
+                              t.button({ type: "button", className: "btn sm", onclick: addWidget }, t.i({ className: "ri-add-line" }), "Add"),
+                          ),
+                          () =>
+                              data.widgets.map((w, i) =>
+                                  t.div(
+                                      { className: "nbx-widget-row" },
+                                      t.div({ className: "grid" },
+                                          t.div({ className: "col-6" },
+                                              t.input({
+                                                  type: "text",
+                                                  placeholder: "Title",
+                                                  value: () => w.title || "",
+                                                  oninput: (ev) => (w.title = ev.target.value),
+                                              }),
+                                          ),
+                                          t.div({ className: "col-6" },
+                                              app.components.select({
+                                                  value: () => w.type,
+                                                  options: NbxWidgetTypes,
+                                                  onchange: (sel) => (w.type = sel?.[0]?.value || "text"),
+                                              }),
+                                          ),
+                                          t.div({ className: "col-12" },
+                                              app.components.select({
+                                                  value: () => w.source,
+                                                  options: app.store.collections
+                                                      .filter((c) => c.type == "base" || c.type == "auth")
+                                                      .map((c) => ({ value: c.name, label: c.name })),
+                                                  placeholder: "Source collection",
+                                                  onchange: (sel) => (w.source = sel?.[0]?.value || ""),
+                                              }),
+                                          ),
+                                          w.type == "kpi"
+                                              ? t.div({ className: "col-12" },
+                                                    app.components.select({
+                                                        value: () => w.aggregate,
+                                                        options: ["count", "sum", "avg", "min", "max"].map((v) => ({ value: v, label: v })),
+                                                        onchange: (sel) => (w.aggregate = sel?.[0]?.value || "count"),
+                                                    }),
+                                                )
+                                              : null,
+                                          w.type == "text"
+                                              ? t.div({ className: "col-12" },
+                                                    t.textarea({
+                                                        rows: 3,
+                                                        placeholder: "Text content",
+                                                        value: () => w.text || "",
+                                                        oninput: (ev) => (w.text = ev.target.value),
+                                                    }),
+                                                )
+                                              : null,
+                                          w.type == "table" || w.type == "chart"
+                                              ? t.div({ className: "col-12" },
+                                                    app.components.select({
+                                                        value: () => w.field,
+                                                        options: [],
+                                                        placeholder: "Value field (chart) — leave empty for all table fields",
+                                                        onchange: (sel) => (w.field = sel?.[0]?.value || ""),
+                                                    }),
+                                                )
+                                              : null,
+                                          w.type == "map"
+                                              ? t.div({ className: "col-12" },
+                                                    t.input({
+                                                        type: "text",
+                                                        placeholder: "geoPoint field name",
+                                                        value: () => w.field || "",
+                                                        oninput: (ev) => (w.field = ev.target.value),
+                                                    }),
+                                                )
+                                              : null,
+                                      ),
+                                  ),
+                              ),
+                      )
+                    : null,
+            ),
+        ),
+        t.div(
+            { className: "modal-footer" },
+            t.button({ type: "button", className: "btn", onclick: () => app.modals.close(modal) }, "Cancel"),
+            t.button(
+                {
+                    className: "btn primary",
+                    onclick: save,
+                },
+                data.isNew ? "Create" : "Save",
+            ),
+        ),
+    );
+
+    return new Promise((resolve) => {
+        resolveClose = resolve;
+        document.body.appendChild(modal);
+        app.modals.open(modal);
+    });
+}
+
+async function nbxDeleteRecord(collectionName, id, label) {
+    await new Promise((resolve) => {
+        app.modals.confirm(
+            `Delete "${label || id}"?`,
+            async () => {
+                try {
+                    await app.pb.collection(collectionName).delete(id, { requestKey: "nbx.delete" });
+                    app.toasts.success("Deleted.");
+                } catch (err) {
+                    app.checkApiError(err);
+                }
+                resolve();
+            },
+            () => resolve(),
+        );
+    });
+}
+
+// --- report compose page -----------------------------------------------------
+window.app.components.nbxReportPage = function(propsArg = {}) {
+    const props = store({ report: {}, dashboard: {}, widgets: [] });
+
+    const watchers = app.utils.extendStore(props, propsArg);
+
+    async function load() {
+        if (!props.report?.dashboard) {
+            props.dashboard = null;
+            props.widgets = [];
+            return;
+        }
+        try {
+            props.dashboard = await app.pb.collection(NbxDashboardsCollection).getOne(props.report.dashboard, {
+                requestKey: "nbx.reportDashboard",
+            });
+            const payload = await nbxFetchWidgets(props.dashboard.id);
+            props.widgets = payload.data || [];
+        } catch (err) {
+            if (!err.isAbort) {
+                app.checkApiError(err);
+            }
+        }
+    }
+
+    watch(() => props.report?.dashboard, () => load());
+    watchers?.push(watch(() => props.reloadKey, () => load()));
+
+    function downloadPdf() {
+        if (!props.report?.id) {
+            return;
+        }
+        const url = app.pb.buildURL("/api/nbx/reports/" + props.report.id + "/pdf");
+        const headers = {};
+        const token = app.pb.authStore?.token;
+        if (token) {
+            headers["Authorization"] = token;
+        }
+        fetch(url, { method: "GET", headers })
+            .then((res) => {
+                if (!res.ok) {
+                    throw new Error("Failed to generate the report PDF.");
+                }
+                return res.blob();
+            })
+            .then((blob) => {
+                app.utils.download(window.URL.createObjectURL(blob), (props.report.label || "report") + ".pdf");
+            })
+            .catch((err) => app.checkApiError(err));
+    }
+
+    return t.div(
+        { className: "nbx-report-page" },
+        t.div(
+            { className: "nbx-report-head" },
+            t.div({ className: "nbx-report-head-left" }, t.h2(props.report.label || "Report")),
+            t.div({ className: "nbx-report-head-actions" }, t.button({ className: "btn primary", onclick: downloadPdf }, t.i({ className: "ri-download-line" }), "PDF")),
+        ),
+        t.div(
+            { className: "nbx-widgets-grid" },
+            props.widgets.map((entry) => nbxWidgetView(entry)),
+        ),
+    );
+};
+
+// --- workspace: dashboards + reports cards -----------------------------------
+window.app.components.nbxReportsSection = function(propsArg = {}) {
+    const props = store({ dashboards: [], reports: [], isLoading: false });
+
+    const watchers = app.utils.extendStore(props, propsArg);
+
+    async function load() {
+        props.isLoading = true;
+        try {
+            props.dashboards = await nbxLoadDashboards();
+            props.reports = await nbxLoadReports();
+        } catch (err) {
+            if (!err.isAbort) {
+                app.checkApiError(err);
+            }
+        } finally {
+            props.isLoading = false;
+        }
+    }
+
+    watch(() => app.store._ready, (r) => r && load());
+    watchers?.push(watch(() => props.reloadKey, () => load()));
+
+    async function openEditor(kind, record) {
+        const saved = await nbxDashboardReportModal(kind, record, props.dashboards);
+        if (saved) {
+            load();
+        }
+    }
+
+    async function remove(collectionName, id, label) {
+        await nbxDeleteRecord(collectionName, id, label);
+        load();
+    }
+
+    const itemActions = (kind, record) =>
+        t.div(
+            { className: "nbx-list-actions" },
+            kind == "report"
+                ? t.a({ className: "btn sm primary", href: () => `#/workspace/report/${record.id}` }, "Open")
+                : t.a({ className: "btn sm primary", href: () => `#/workspace/dashboard/${record.id}` }, "Open"),
+            t.button({ className: "btn sm", onclick: () => openEditor(kind, record) }, t.i({ className: "ri-pencil-line" })),
+            t.button({ className: "btn sm", onclick: () => remove(kind == "dashboard" ? NbxDashboardsCollection : NbxReportsCollection, record.id, record.label) }, t.i({ className: "ri-delete-bin-line" })),
+        );
+
+    return t.div(
+        { className: "grid" },
+        t.div(
+            { className: "col-12 col-med-6" },
+            t.div(
+                { className: "card" },
+                t.div(
+                    { className: "card-header" },
+                    t.strong("Dashboards"),
+                    t.button({ className: "btn sm", onclick: () => openEditor("dashboard", null) }, t.i({ className: "ri-add-line" })),
+                ),
+                () => {
+                    if (props.isLoading) {
+                        return t.span({ className: "loader sm" });
+                    }
+                    if (!props.dashboards.length) {
+                        return t.p({ className: "empty-state" }, "No dashboards yet.");
+                    }
+                    return t.div(
+                        { className: "list" },
+                        props.dashboards.map((d) =>
+                            t.div({ className: "list-item" }, t.i({ className: "ri-dashboard-line" }), t.span({ className: "txt-ellipsis grow" }, d.label || d.id), itemActions("dashboard", d)),
+                        ),
+                    );
+                },
+            ),
+        ),
+        t.div(
+            { className: "col-12 col-med-6" },
+            t.div(
+                { className: "card" },
+                t.div(
+                    { className: "card-header" },
+                    t.strong("Reports"),
+                    t.button({ className: "btn sm", onclick: () => openEditor("report", null) }, t.i({ className: "ri-add-line" })),
+                ),
+                () => {
+                    if (props.isLoading) {
+                        return t.span({ className: "loader sm" });
+                    }
+                    if (!props.reports.length) {
+                        return t.p({ className: "empty-state" }, "No reports yet.");
+                    }
+                    return t.div(
+                        { className: "list" },
+                        props.reports.map((r) =>
+                            t.div({ className: "list-item" }, t.i({ className: "ri-file-chart-line" }), t.span({ className: "txt-ellipsis grow" }, r.label || r.id), itemActions("report", r)),
+                        ),
+                    );
+                },
+            ),
+        ),
+    );
+};
+
+// --- routes ------------------------------------------------------------------
+app.routes.superuserOnly("#/workspace/dashboard/{id}", async (route) => {
+    let dashboard = null;
+    try {
+        dashboard = await app.pb.collection(NbxDashboardsCollection).getOne(route.params.id, { requestKey: "nbx.dashboard" });
+    } catch (err) {
+        if (!err.isAbort) {
+            app.checkApiError(err);
+        }
+    }
+    if (!dashboard?.id) {
+        return t.div({ className: "page" }, t.p({ className: "empty-state" }, "Dashboard not found."));
+    }
+
+    app.store.title = dashboard.label || "Dashboard";
+
+    return t.div(
+        { className: "page" },
+        t.div(
+            { className: "page-header" },
+            t.h2(dashboard.label || "Dashboard"),
+            t.div(
+                { className: "page-actions" },
+                t.button({ className: "btn", onclick: () => (window.location.hash = "#/workspace") }, "Back"),
+            ),
+        ),
+        app.components.nbxDashboard({ dashboard }),
+    );
+});
+
+app.routes.superuserOnly("#/workspace/report/{id}", async (route) => {
+    let report = null;
+    try {
+        report = await app.pb.collection(NbxReportsCollection).getOne(route.params.id, { requestKey: "nbx.report" });
+    } catch (err) {
+        if (!err.isAbort) {
+            app.checkApiError(err);
+        }
+    }
+    if (!report?.id) {
+        return t.div({ className: "page" }, t.p({ className: "empty-state" }, "Report not found."));
+    }
+
+    app.store.title = report.label || "Report";
+
+    return t.div(
+        { className: "page" },
+        t.div(
+            { className: "page-header" },
+            t.h2(report.label || "Report"),
+            t.div(
+                { className: "page-actions" },
+                t.button({ className: "btn", onclick: async () => {
+                    const dashboards = await nbxLoadDashboards().catch(() => []);
+                    const saved = await nbxDashboardReportModal("report", report, dashboards);
+                    if (saved?.id) {
+                        window.location.reload();
+                    }
+                } }, t.i({ className: "ri-pencil-line" }), "Edit"),
+                t.button({ className: "btn", onclick: () => (window.location.hash = "#/workspace") }, "Back"),
+            ),
+        ),
+        app.components.nbxReportPage({ report }),
+    );
+});
 
 // add a "Workspace" entry to the top nav
 if (!app.store.headerLinks.find((l) => l.href == "#/workspace")) {

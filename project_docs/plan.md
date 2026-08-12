@@ -311,10 +311,13 @@ extension -> full app with all features.
 - **P1 — External datasource engine (read-only)**: `core/datasource/`, per-dialect dbx builders,
   REST fetch + cache, `record_crud.go` routing, `/nbx/datasources` + validation.
   **DoD:** external table browsable/searchable/sortable, no schema sync.
+  **Status: DONE** (verified + tested).
 - **P2 — Views**: `_views` config + `datasView` components: grid -> card/kanban -> calendar ->
   gallery -> form. Reuse fieldTypes throughout.
+  **Status: DONE** (verified + tested).
 - **P3 — Dashboards, reports, PDF**: widgets (KPI/table/chart/text/**map**), report render,
   server-side HTML->PDF.
+  **Status: DONE** (verified + tested).
 - **P4 — Buttons & scripting**: `open_page` (UI-only) then `run_js` via JSVM.
 - **P5 — Import/Export**: shared `svcs/io` engine -> CSV + **XLSX via excelize** (streaming,
   both directions) -> **SQL-table targets** (export-db/import-db, HTTP + CLI; auto-create table,

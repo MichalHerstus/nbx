@@ -14,4 +14,6 @@ import (
 // superuser-authorized) route group.
 func Register(app core.App, nbxRoute *router.RouterGroup[*core.RequestEvent]) {
 	nbxRoute.GET("/datasources", datasourcesList(app))
+	nbxRoute.GET("/reports/{id}/pdf", reportsPdf(app))
+	nbxRoute.GET("/dashboards/{id}/widgets", dashboardWidgets(app))
 }
