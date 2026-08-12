@@ -53,9 +53,10 @@ New `source` block on every collection:
 ```
 datasource: {
   type: "local" | "mysql" | "postgres" | "mssql" | "rest",
-  dsn / host,port,user,password,db, ssl,        // SQL dialects
+  credentialRef: "<vault name>",                  // see F9 (secrets never inline)
+  dsn / host,port,db, ssl,                        // SQL dialects (non-secret parts)
   table / query,
-  url, method, headers, jsonPath, auth,          // REST
+  url, method, headers, jsonPath, auth,            // REST
   refresh: "manual" | "cron" | "realtime"
 }
 ```
@@ -141,7 +142,7 @@ the HTTP (`/api/nbx/export/db`, `/api/nbx/import/db`) and the CLI.
 ### F6 — AI assistant (workspace copilot)
 - **Provider-agnostic OpenAI-compatible client** (`core/ai` `LLMClient`); config selects
   `openrouter` (cloud) | `ollama`/`lmstudio` (local, `localhost:11434`/`:1234`). One code path,
-  no vendor SDKs.
+  no vendor SDKs. 
 - **Tool loop over a PB tool registry** — each tool wraps an existing PB operation with an OpenAI
   function schema:
   - Read (auto-run): `listCollections`, `searchRecords(filter)`, `getRecord`, `listViews`, aggregations
@@ -180,6 +181,97 @@ PB already ships light/dark + a **global** accent (`app.store.activeColorScheme`
 - Prefs persisted in a small PB collection keyed to the user (syncable across devices,
   manageable in-app).
 
+### F9 — Secure credential storage (Settings vault)
+Extend the PB setup so NextBase can enter & store (1) the **OpenRouter API key**, (2)
+**credentials for SQL/REST view collections** (F1 datasources), and (3) **credentials for
+external-SQL import/export** (F5). Reuses PB's existing secrets mechanism.
+- Add a `Nbx` subsection to the app settings JSON (`core/settings_model.go`), which already
+  encrypts at rest with `--encryptionEnv` (mirror PB default: encrypt only when set; UI warns
+  when unset) and masks secret fields on every API read (same mechanism as `SMTP.Password` /
+  `S3.Secret`).
+- `Nbx` contains:
+  - **`Ai`** — provider (`openrouter|ollama|lmstudio`), `model`, `baseUrl`, `temperature`,
+    `streaming`, and **`apiKey` as a dedicated masked field** (OpenRouter key lives here, like
+    SMTP.Password).
+  - **`Secrets`** — a named vault map `{ name: { user, password, apiKey, token, url } }` used by
+    datasources and external-SQL import/export.
+- **Referenced-by-name, not inline plaintext:** F1 datasource config (`_datasources` / collection
+  `source` block) keeps non-secret fields (`host/port/db/table/query/url/refresh/type`) and stores
+  a `credentialRef` (name) instead of `user/password/apiKey` — so credentials never leak through
+  the records/datasources API.
+- F5 SQL-table export/import resolves credentials from the vault by datasource name at run time
+  (HTTP and CLI both use `app.Settings().Nbx.Secrets`; CLI can decrypt offline since it has the
+  app instance + encryption env). Inline `--driver/--dsn` still allowed for ad-hoc use.
+- Code/extension points: `core/settings_model.go` (add `Nbx` + mask handling); `apis/settings.go`
+  (no change — new fields ride existing `settingsSet`/`settingsList`); UI **Settings** extension
+  tab in `ui-ext/nbx/` ("NextBase -> Credentials & AI": OpenRouter key + named-credential manager,
+  masked inputs, "leave blank to keep existing"); runtime consumers (F1 REST fetcher/SQL builder,
+  F5 `svcs/io`) look up secrets by name via `app.Settings().Nbx.Secrets`.
+  - Future: a separate **`AiVision`** block (provider/model/baseUrl/temperature + masked `apiKey`)
+    for the camera quick-entry feature, stored via this same mechanism.
+
+### F10 — Responsive design (smartphone / mobile support)
+Goal: every data view (grid/list, card/kanban, calendar, gallery, form) + dashboard/report
+widgets is fully usable on small smartphone screens in both **portrait and landscape**, with no
+body-level horizontal scrollbar and touch-first controls.
+
+- **Approach:** reuse PB's existing responsive primitives — width breakpoints (`vars.css` ≤900px
+  spacing/buttons), the `responsive-table` card-stack (≤600px, `data-name` labeled cells,
+  `table.css`), CSS **container queries** (`container-type: inline-size` + `@container`, as in
+  `recordFields.css`/`form.css`), hover-gated touch affordances (`@media (hover: none)`, e.g.
+  `list.css`), and live resize handling (`pageSidebar.js`) — no new responsive mechanism.
+- **Orientation:** width-based media queries drive stacking; **height/orientation** media queries
+  handle landscape (short viewport). Pages scroll vertically and use `100%`/`dvh` heights
+  independent of the mobile URL bar (mirror `layout.css` `.app { height:100% }` comment).
+- **Per-view rules:**
+  - `grid`/list → `responsive-table` labeled-card stacking; sticky bulk-select preserved; the
+    per-view field/column picker (reuse `recordsList` columns dropdown) lets phones show only
+    relevant fields.
+  - `form` → fields collapse to a single column via container query; ≥44px touch targets
+    (within PB vars); primary actions kept reachable in a sticky bar above the on-screen keyboard.
+  - `card`/kanban → horizontally swipeable column strip with a visible scroll affordance, or a
+    single-column vertical list on narrow widths; drag/reorder surfacing via `(hover:none)`.
+  - `calendar` → responsive day-grid density; landscape-trimmed header to reclaim vertical space.
+  - `gallery` → `repeat(auto-fill, minmax(...))` tile grid (mirror `recordFilePicker.css`
+    breakpoints); thumbnails remain tappable.
+  - `dashboard`/reports → widget grid collapses to a single column; KPI/table/chart/map tiles go
+    full-width; the Leaflet map uses touch controls and full-bleed height.
+- **System/UX:** safe-area insets (`env(safe-area-inset-*)`, esp. in PWA `standalone` mode),
+  `-webkit-tap-highlight` cleanup, `(hover:none)`-gated action buttons, and touch-sized controls
+  throughout. Orientation changes re-evaluated live.
+- **Implementation:** an extension stylesheet (e.g. `ui-ext/nbx/css/responsive.css`) imported with
+  the extension; each `datasView` component renders semantic classes / `data-name` hooks so one
+  shared responsive stylesheet applies uniformly. Acceptance: each view renders at ~320×568
+  (portrait) and ~568×320 (landscape) with no page-level horizontal scrollbar and touch-operable
+  controls.
+
+### Nice to have (future — out of scope now): Smartphone camera quick-entry
+Use the device camera + optional AI vision to speed up record entry on small screens. Two
+related, phone-first capabilities:
+
+- **Barcode/QR → form input.** Scan a barcode (EAN/UPC/QR/Code128) with the rear camera and insert
+  the decoded value into the matching form field. Deterministic, on-device decode — first via the
+  native `BarcodeDetector` API (Chromium/Android), falling back to a JS lib
+  (`@zxing/library` / `html5-qrcode`, static asset served through the UI extension) for Safari/iOS
+  and other formats. **No AI required.** Config: per-view flag marking barcode-enabled field(s);
+  reuses F2 `datasView` form + the `recordUpsertModal` input registry. Requires **no Go changes**
+  (browser decode + existing record create).
+- **Photo → new record (AI vision OCR).** Photograph a document (e.g. a purchase order) and let a
+  vision-capable model extract fields into a prefilled form; the user reviews/confirms before the
+  standard RecordCreate write path runs (same preview-and-confirm safety model as F6; hooks +
+  validation still apply). Reuses the F6 `core/ai` `LLMClient` + tool-loop + F2 form prefill.
+
+- **Separate vision model & credentials.** The vision feature uses its **own** AI config
+  (`Nbx.AiVision`: provider/model/baseUrl/temperature + masked `apiKey`) rather than the chat's
+  `Nbx.Ai` — so a cheaper/faster or vision-only model can be chosen independently (OpenRouter
+  vision model; local Ollama/LM Studio only if the selected model supports vision). Both `Ai` and
+  `AiVision` are stored via the same **F9 Settings-vault** mechanism (encrypted at rest, masked on
+  read) and configured in the same **Settings → "Credentials & AI"** extension tab ("leave blank to
+  keep existing"). The F6 assistant/chat continues to use `Nbx.Ai`.
+- Both capabilities tie into the F10 responsive/mobile work (camera framing, touch UX).
+  Considerations: camera-permission UX, `BarcodeDetector` availability fallback, per-field barcode
+  config, vision-model cost/latency, and transient (non-stored) image handling.
+
 ## 3. Backend changes (reusing PB patterns)
 - `core/collection_model_base_options.go` — extend `collectionBaseOptions` with the `source` block; validator parity.
 - `core/datasource/` (new) — Registry, per-dialect resolvers, REST fetcher, cache; `dbx.NullStringMap`->`[]*Record` hydration (mirror `record_query.go`).
@@ -188,6 +280,7 @@ PB already ships light/dark + a **global** accent (`app.store.activeColorScheme`
 - `svcs/io/` (new) — shared import/export engine: CSV/XLSX + SQL-table targets; per-dialect DDL + column mapping; used by both HTTP routes and CLI commands.
 - `cmd/nbx/` (new) — cobra commands registered from `plugins/nbx`: `export`, `import`, `export-db`, `import-db` (run against the app instance directly; no auth token; works offline).
 - `core/ai/` (new) — `LLMClient` (OpenAI-compatible), `ToolRegistry`, tool-loop engine.
+- `core/settings_model.go` — add `Nbx` settings subsection (`Ai` + `Secrets` vault); hook into existing mask/`MarshalJSON` handling.
 - `core/i18n/` (new) + UI i18n module — dictionaries + `$t()` + user locale store (EN/CZ, extensible).
 - `plugins/nbx/register.go` (new) — `Register(app)` wiring `Se.UIExtensions` + hooks; consumed from a new binary.
 - Meta collections auto-created at bootstrap (system migration, reuse `RunSystemMigrations`).
@@ -196,11 +289,15 @@ PB already ships light/dark + a **global** accent (`app.store.activeColorScheme`
 New UI extension dir `ui-ext/nbx/` registering: `app.store.headerLinks` (new nav),
 `app.routes.superuserOnly("#/workspace", ...)`, nav per view/dashboard type, and components
 `datasView`, `dashboard`, `report`, `button`, `importExport`, `assistantPanel`, `prefsPopover`,
+`credentialsTab` (Settings: OpenRouter key + named-credential vault manager),
 `nbxMap` (OSM multi-marker Leaflet map widget).
 Reuse `app.pb.collection(...).getList`, `app.store.collections`, `app.fieldTypes`,
 `app.modals.openRecordUpsert`, `watch/store`, CSS under `ui/src/css/_main.css`-style.
 i18n: all extension strings go through `app.i18n.$t(key)` (EN/CZ dictionaries). Theme: extension
 components consume the shared CSS variables; user prefs applied via `--accentColor`/data-color-scheme.
+Responsive: extension views ship a shared `responsive.css` (F10) using PB's breakpoints, the
+`responsive-table` card-stack pattern, and container queries; every view passes its mobile
+acceptance criterion (~320×568 portrait, ~568×320 landscape).
 
 ## 5. Deliverable runnable target
 New binary `./cmd/nbx/main.go` — `pocketbase.New()` + `plugins/nbx.Register(app)` + UI
@@ -210,7 +307,7 @@ extension -> full app with all features.
 
 - **P0 — Scaffold & platform**: `cmd/nbx/main.go` (pocketbase.New + plugins.nbx.Register + UI ext);
   system migration creating `_datasources/_views/_dashboards/_reports/_buttons/_preferences`;
-  `source` block in `collectionBaseOptions`.
+  `source` block in `collectionBaseOptions`; **Settings `Nbx` subsection (`Ai` + `Secrets` vault)**.
 - **P1 — External datasource engine (read-only)**: `core/datasource/`, per-dialect dbx builders,
   REST fetch + cache, `record_crud.go` routing, `/nbx/datasources` + validation.
   **DoD:** external table browsable/searchable/sortable, no schema sync.
@@ -225,7 +322,8 @@ extension -> full app with all features.
 - **P6 — AI assistant**: `core/ai` client + tool registry + tool loop -> `/api/ai/chat` (SSE) ->
   copilot side-panel -> config page (OpenRouter / Ollama / LM Studio verified E2E).
 - **P7 — i18n & theming**: prefs collection + i18n module (EN/CZ, `$t`) + per-user theme overrides
-  (`--accentColor`/data-color-scheme) + workspace prefs popover.
+  (`--accentColor`/data-color-scheme) + workspace prefs popover. Responsive (F10) is a
+  cross-cutting acceptance criterion applied to every shipped view on both portrait & landscape.
 - **P8 — Docs, tests, validation suites.**
 
 ## 7. Key risks / constraints
@@ -246,6 +344,10 @@ extension -> full app with all features.
   for JSON-encoded fields (relation/select/json/geoPoint/file); `--create-collection` infers
   best-effort field types (review before use); DSNs hold credentials (plaintext in config for
   now, encryption later via `--encryptionEnv`).
+- **Credential storage (F9):** secrets live in the encrypted Settings vault, referenced by name
+  from datasources (never inline on records, so they don't leak via the records API). At-rest
+  encryption still requires `--encryptionEnv` (PB behavior) — surface a clear UI warning when
+  unset so users opt in.
 
 ## 8. Decisions (confirmed)
 1. F1 external SQL/REST data sources = **read-only** (browse/search/export; no live cross-dialect schema sync). SQL **table export/import** (F5) is a separate, explicit one-shot write/move operation to an external SQL table — the only path that writes to external SQL.
@@ -261,6 +363,13 @@ extension -> full app with all features.
 10. Import/export exposed both via **HTTP and CLI**; SQL-table targets (export-db/import-db) are
     SQL-only (no REST), share one `svcs/io` engine, auto-create missing tables (append by default,
     `--replace` optional), and support `--create-collection` on import.
+11. Secrets (OpenRouter key + SQL/REST credentials) stored in a **central vault in the Settings
+    blob** (`Nbx.Ai.apiKey` dedicated masked field + named `Nbx.Secrets` map), referenced by name
+    from datasources; at-rest encryption mirrors PB (`--encryptionEnv`). A future `Nbx.AiVision`
+    block holds the camera quick-entry feature's own model/key via the same mechanism.
+12. **Responsive (smartphone) support is a cross-cutting acceptance criterion** (F10) for every
+    NextBase view and dashboard widget — must work in portrait and landscape with no page-level
+    horizontal scrollbar and touch-first controls.
 
 ## 9. Open verification points to resolve at implementation start
 - Confirm HTML->PDF renderer lib name (honor lean-on-PB constraint), checked against `go.mod`.
