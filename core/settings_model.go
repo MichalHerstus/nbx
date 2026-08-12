@@ -132,6 +132,7 @@ type settings struct {
 	TrustedProxy TrustedProxyConfig `form:"trustedProxy" json:"trustedProxy"`
 	Batch        BatchConfig        `form:"batch" json:"batch"`
 	Logs         LogsConfig         `form:"logs" json:"logs"`
+	Nbx          NbxConfig          `form:"nbx" json:"nbx"`
 }
 
 // Settings defines the PocketBase app settings.
@@ -182,6 +183,14 @@ func newDefaultSettings() *Settings {
 					{Label: "/api/batch", MaxRequests: 3, Duration: 1},
 					{Label: "/api/", MaxRequests: 300, Duration: 10},
 				},
+			},
+			Nbx: NbxConfig{
+				Ai: AiConfig{
+					Provider:    AiProviderOpenRouter,
+					Temperature: 0.7,
+					Streaming:   true,
+				},
+				Secrets: map[string]Credential{},
 			},
 		},
 	}
@@ -300,6 +309,7 @@ func (s *Settings) PostValidate(ctx context.Context, app App) error {
 		validation.Field(&s.Batch),
 		validation.Field(&s.RateLimits),
 		validation.Field(&s.TrustedProxy),
+		validation.Field(&s.Nbx),
 	)
 }
 
@@ -346,6 +356,7 @@ func (s *Settings) MarshalJSON() ([]byte, error) {
 		&copy.SMTP.Password,
 		&copy.S3.Secret,
 		&copy.Backups.S3.Secret,
+		&copy.Nbx.Ai.ApiKey,
 	}
 
 	// mask all sensitive fields
@@ -354,6 +365,18 @@ func (s *Settings) MarshalJSON() ([]byte, error) {
 			*v = ""
 		}
 	}
+
+	// mask the named credential vault sensitive fields
+	if copy.Nbx.Ai.ApiKey == "" {
+		copy.Nbx.Ai.hideApiKey = true
+	}
+	secretsCopy := make(map[string]Credential, len(copy.Nbx.Secrets))
+	for name, cred := range copy.Nbx.Secrets {
+		c := cred
+		c.MarkAsHidden()
+		secretsCopy[name] = c
+	}
+	copy.Nbx.Secrets = secretsCopy
 
 	// @todo remove with encoding/json/2
 	// serialize as empty array
@@ -771,4 +794,145 @@ func (c RateLimitRule) String() string {
 	}
 
 	return string(raw)
+}
+
+// -------------------------------------------------------------------
+// Nbx (NextBase) settings
+// -------------------------------------------------------------------
+
+const (
+	AiProviderOpenRouter = "openrouter"
+	AiProviderOllama     = "ollama"
+	AiProviderLMStudio   = "lmstudio"
+)
+
+// NbxConfig holds the NextBase specific app settings.
+//
+// It is serialized as part of the app settings blob and, like the other
+// sensitive fields, encrypted at rest when the app runs with an
+// `--encryptionEnv` key.
+type NbxConfig struct {
+	// Ai holds the OpenAI-compatible chat/assistant provider configuration.
+	Ai AiConfig `form:"ai" json:"ai"`
+
+	// Secrets is a named credential vault referenced by datasources and
+	// SQL import/export via a name (never inlined on records/config).
+	Secrets map[string]Credential `form:"secrets" json:"secrets"`
+}
+
+// Validate makes NbxConfig validatable by implementing the [validation.Validatable] interface.
+func (c NbxConfig) Validate() error {
+	return validation.ValidateStruct(&c,
+		validation.Field(&c.Ai),
+		validation.Field(&c.Secrets),
+	)
+}
+
+// MarshalJSON implements the [json.Marshaler] interface.
+func (c NbxConfig) MarshalJSON() ([]byte, error) {
+	type alias NbxConfig
+
+	// serialize as empty object/map
+	if c.Secrets == nil {
+		c.Secrets = map[string]Credential{}
+	}
+
+	return json.Marshal(alias(c))
+}
+
+// -------------------------------------------------------------------
+
+// AiConfig defines the OpenAI-compatible provider settings for the
+// NextBase assistant (F6).
+type AiConfig struct {
+	// Provider is one of "openrouter", "ollama" or "lmstudio".
+	Provider string `form:"provider" json:"provider"`
+
+	Model       string  `form:"model" json:"model"`
+	BaseURL     string  `form:"baseUrl" json:"baseUrl"`
+	Temperature float64 `form:"temperature" json:"temperature"`
+	Streaming   bool    `form:"streaming" json:"streaming"`
+	ApiKey      string  `form:"apiKey" json:"apiKey,omitempty"`
+	hideApiKey  bool
+}
+
+// Validate makes AiConfig validatable by implementing the [validation.Validatable] interface.
+func (c AiConfig) Validate() error {
+	return validation.ValidateStruct(&c,
+		validation.Field(&c.Provider, validation.In(AiProviderOpenRouter, AiProviderOllama, AiProviderLMStudio)),
+		validation.Field(&c.Temperature, validation.By(checkAITemperature)),
+	)
+}
+
+func checkAITemperature(value any) error {
+	temp, ok := value.(float64)
+	if ok {
+		if !(temp >= 0 && temp <= 2) {
+			return validation.NewError("validation_ai_temperature", "AI temperature must be between 0 and 2.")
+		}
+	}
+
+	return nil
+}
+
+// MarshalJSON implements the [json.Marshaler] interface.
+func (c AiConfig) MarshalJSON() ([]byte, error) {
+	type alias AiConfig
+
+	if c.hideApiKey {
+		v := struct {
+			alias
+			ApiKey string `json:"apiKey,omitempty"`
+		}{alias(c), ""}
+
+		return json.Marshal(v)
+	}
+
+	return json.Marshal(alias(c))
+}
+
+// -------------------------------------------------------------------
+
+// Credential defines a single named vault entry for external datasources,
+// external-SQL import/export and the AI provider key.
+type Credential struct {
+	User     string `form:"user" json:"user"`
+	Password string `form:"password" json:"password,omitempty"`
+	APIKey   string `form:"apiKey" json:"apiKey,omitempty"`
+	Token    string `form:"token" json:"token,omitempty"`
+	URL      string `form:"url" json:"url"`
+
+	hideSecrets bool
+}
+
+// Validate makes Credential validatable by implementing the [validation.Validatable] interface.
+func (c Credential) Validate() error {
+	return nil
+}
+
+// MarkAsHidden marks the credential sensitive fields to be excluded
+// from the JSON serialization.
+func (c *Credential) MarkAsHidden() {
+	c.hideSecrets = true
+}
+
+// MarshalJSON implements the [json.Marshaler] interface.
+//
+// Note that sensitive fields (password, apiKey, token) are excluded when
+// the credential is marked as hidden.
+func (c Credential) MarshalJSON() ([]byte, error) {
+	type alias Credential
+
+	if c.hideSecrets {
+		v := struct {
+			alias
+			Password string `json:"password,omitempty"`
+			APIKey   string `json:"apiKey,omitempty"`
+			Token    string `json:"token,omitempty"`
+		}{alias(c), "", "", ""}
+
+		return json.Marshal(v)
+	}
+
+	return json.Marshal(alias(c))
 }

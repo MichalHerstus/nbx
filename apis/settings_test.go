@@ -210,8 +210,8 @@ func TestSettingsSet(t *testing.T) {
 				`"appName":"update_test"`,
 			},
 			NotExpectedContent: []string{
-				"secret",
-				"password",
+				`"secret":"`,
+				`"password":"`,
 			},
 			ExpectedEvents: map[string]int{
 				"*":                         0,

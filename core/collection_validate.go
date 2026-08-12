@@ -692,7 +692,7 @@ func (validator *collectionValidator) validateOptions() error {
 		return validator.new.collectionAuthOptions.validate(validator)
 	case CollectionTypeView:
 		return validator.new.collectionViewOptions.validate(validator)
+	default:
+		return validator.new.collectionBaseOptions.validate(validator)
 	}
-
-	return nil
 }

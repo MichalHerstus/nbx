@@ -381,6 +381,7 @@ type baseCollection struct {
 // Collection defines the table, fields and various options related to a set of records.
 type Collection struct {
 	baseCollection
+	collectionBaseOptions
 	collectionAuthOptions
 	collectionViewOptions
 }
@@ -514,7 +515,7 @@ func (m *Collection) unmarshalRawOptions() error {
 		return json.Unmarshal(raw, &m.collectionAuthOptions)
 	}
 
-	return nil
+	return json.Unmarshal(raw, &m.collectionBaseOptions)
 }
 
 // UnmarshalJSON implements the [json.Unmarshaler] interface.
@@ -584,7 +585,10 @@ func (m Collection) MarshalJSON() ([]byte, error) {
 
 		return json.Marshal(alias)
 	default:
-		return json.Marshal(m.baseCollection)
+		return json.Marshal(struct {
+			baseCollection
+			collectionBaseOptions
+		}{m.baseCollection, m.collectionBaseOptions})
 	}
 }
 
@@ -622,6 +626,12 @@ func (m *Collection) DBExport(app App) (map[string]any, error) {
 		}
 	case CollectionTypeAuth:
 		if raw, err := types.ParseJSONRaw(m.collectionAuthOptions); err == nil {
+			result["options"] = raw
+		} else {
+			return nil, err
+		}
+	default:
+		if raw, err := types.ParseJSONRaw(m.collectionBaseOptions); err == nil {
 			result["options"] = raw
 		} else {
 			return nil, err
