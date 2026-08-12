@@ -46,11 +46,14 @@ jobs:
       - name: Run tests
         run: go test ./...
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: '~> v2'
-          args: release --clean ${{ env.flags }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Release packaging is disabled until all features in project_docs/plan.md are implemented.
+      # Re-enable once the plan is complete.
+      #
+      # - name: Run GoReleaser
+      #   uses: goreleaser/goreleaser-action@v6
+      #   with:
+      #     distribution: goreleaser
+      #     version: '~> v2'
+      #     args: release --clean ${{ env.flags }}
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
