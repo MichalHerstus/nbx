@@ -705,6 +705,7 @@ window.app.components.nbxWorkspace = function(propsArg = {}) {
             ),
         ),
         app.components.nbxReportsSection({}),
+        app.components.nbxButtonsSection({}),
     );
 };
 
@@ -1430,6 +1431,334 @@ app.routes.superuserOnly("#/workspace/report/{id}", async (route) => {
         app.components.nbxReportPage({ report }),
     );
 });
+
+// NextBase (nbx) P4 — Buttons & simple scripting.
+//
+// _buttons records have a label, an action (open_page | run_js | webhook) and
+// a target. open_page is handled purely client-side (navigate to the target
+// route); run_js and webhook are executed server-side through
+// POST /api/nbx/buttons/{id}/run.
+
+const NbxButtonsCollection = "_buttons";
+
+const NbxButtonActions = [
+    { value: "open_page", label: "Open page" },
+    { value: "run_js", label: "Run script" },
+    { value: "webhook", label: "Webhook" },
+];
+
+async function nbxLoadButtons() {
+    const result = await app.pb.collection(NbxButtonsCollection).getList(1, 200, {
+        sort: "created",
+        requestKey: "nbx.loadButtons",
+    });
+    return result.items;
+}
+
+// execute a single clickable button (used by both the workspace list and the
+// per-record button bar)
+window.app.components.nbxButton = function(propsArg = {}) {
+    const props = store({ button: {}, isLoading: false, output: null });
+
+    const watchers = app.utils.extendStore(props, propsArg);
+
+    async function run() {
+        const action = props.button?.action;
+        const target = props.button?.target || "";
+
+        if (action == "open_page") {
+            if (target) {
+                window.location.hash = target;
+            }
+            return;
+        }
+
+        if (props.isLoading) {
+            return;
+        }
+
+        props.isLoading = true;
+        props.output = null;
+        try {
+            const res = await app.pb.send("/api/nbx/buttons/" + props.button.id + "/run", {
+                method: "POST",
+                requestKey: "nbx.buttonRun",
+            });
+            props.output = res;
+            if (res?.message && res.message != "200 OK") {
+                app.toasts.info("Webhook responded: " + res.message);
+            }
+        } catch (err) {
+            if (!err.isAbort) {
+                app.checkApiError(err);
+            }
+        } finally {
+            props.isLoading = false;
+        }
+    }
+
+    function outputBadge() {
+        const out = props.output;
+        if (!out) {
+            return null;
+        }
+        let text = "";
+        if (out.action == "run_js") {
+            const value = out.output;
+            text = value == null ? "ok" : (typeof value == "object" ? JSON.stringify(value) : String(value));
+        } else if (out.action == "webhook") {
+            text = `webhook: ${out.message || ""}`;
+        }
+        return t.span({ className: "badge nbx-button-output" }, text);
+    }
+
+    return t.span(
+        { className: "nbx-button-wrap" },
+        t.button(
+            {
+                className: () => `btn sm ${props.button?.variant || "secondary"} ${props.isLoading ? "loading" : ""}`,
+                disabled: () => props.isLoading,
+                onclick: run,
+            },
+            t.i({ className: "ri-play-line" }),
+            props.button?.label || "Run",
+        ),
+        outputBadge(),
+    );
+};
+
+// manage buttons: list + create/edit/delete modal
+window.app.components.nbxButtonsSection = function(propsArg = {}) {
+    const props = store({ buttons: [], isLoading: false });
+
+    const watchers = app.utils.extendStore(props, propsArg);
+
+    async function load() {
+        props.isLoading = true;
+        try {
+            props.buttons = await nbxLoadButtons();
+        } catch (err) {
+            if (!err.isAbort) {
+                app.checkApiError(err);
+            }
+        } finally {
+            props.isLoading = false;
+        }
+    }
+
+    watch(() => app.store._ready, (r) => r && load());
+    watchers?.push(watch(() => props.reloadKey, () => load()));
+
+    async function openEditor(record = null) {
+        const saved = await nbxButtonEditorModal(record);
+        if (saved) {
+            load();
+        }
+    }
+
+    async function remove(record) {
+        await nbxDeleteRecord(NbxButtonsCollection, record.id, record.label);
+        load();
+    }
+
+    return t.div(
+        { className: "col-12" },
+        t.div(
+            { className: "card" },
+            t.div(
+                { className: "card-header" },
+                t.strong("Buttons"),
+                t.button({ className: "btn sm", onclick: () => openEditor(null) }, t.i({ className: "ri-add-line" })),
+            ),
+            () => {
+                if (props.isLoading) {
+                    return t.span({ className: "loader sm" });
+                }
+                if (!props.buttons.length) {
+                    return t.p({ className: "empty-state" }, "No buttons yet. Create one to run scripts or webhooks.");
+                }
+                return t.div(
+                    { className: "list" },
+                    props.buttons.map((b) =>
+                        t.div(
+                            { className: "list-item" },
+                            t.i({ className: "ri-play-list-line" }),
+                            t.div(
+                                { className: "content" },
+                                t.span({ className: "txt-ellipsis" }, b.label || b.id),
+                                t.small({ className: "txt-hint" }, b.action || ""),
+                            ),
+                            t.nav({ className: "actions" }, () => [app.components.nbxButton({ button: b })]),
+                            t.nav({ className: "actions" },
+                                t.button({ className: "btn sm", onclick: () => openEditor(b) }, t.i({ className: "ri-pencil-line" })),
+                                t.button({ className: "btn sm", onclick: () => remove(b) }, t.i({ className: "ri-delete-bin-line" })),
+                            ),
+                        ),
+                    ),
+                );
+            },
+        ),
+    );
+};
+
+// button create/edit modal
+function nbxButtonEditorModal(record = null) {
+    const uniqueId = "nbx_button_editor_" + app.utils.randomString();
+
+    const data = store({
+        isNew: !record?.id,
+        label: record?.label || "",
+        action: record?.action || "open_page",
+        target: record?.target || "",
+        config: nbxJSON(record?.config),
+    });
+
+    let modal;
+    let result = null;
+    let resolveClose;
+
+    async function save(ev) {
+        ev?.preventDefault();
+        if (data.action == "open_page" && !data.target) {
+            app.toasts.error("Please provide a target page (e.g. #/workspace).");
+            return;
+        }
+        if (data.action == "webhook" && !data.target) {
+            app.toasts.error("Please provide a webhook URL.");
+            return;
+        }
+        if (data.action == "run_js" && !data.config?.script?.trim()) {
+            app.toasts.error("Please provide a JS script.");
+            return;
+        }
+
+        try {
+            const payload = { label: data.label, action: data.action, target: data.target, config: data.config };
+            const collection = app.pb.collection(NbxButtonsCollection);
+            result = data.isNew ? await collection.create(payload) : await collection.update(record.id, payload);
+            app.toasts.success("Button saved.");
+            app.modals.close(modal, true);
+            return result;
+        } catch (err) {
+            app.checkApiError(err);
+            return null;
+        }
+    }
+
+    const targetLabel = () => {
+        switch (data.action) {
+            case "run_js":
+                return "Script (JS)";
+            case "webhook":
+                return "Webhook URL";
+            case "open_page":
+            default:
+                return "Target page (route)";
+        }
+    };
+
+    modal = t.div(
+        {
+            id: uniqueId,
+            className: "modal nbx-button-editor",
+            onafterclose: (el) => {
+                el?.remove();
+                resolveClose?.(result);
+            },
+            onunmount: () => {},
+        },
+        t.header({ className: "modal-header" }, t.h6({ className: "modal-title" }, data.isNew ? "Create button" : "Edit button")),
+        t.div(
+            { className: "modal-content" },
+            t.form(
+                { className: "grid", onsubmit: save },
+                t.div(
+                    { className: "col-12" },
+                    t.label({ for: uniqueId + "_label" }, "Label"),
+                    t.input({ id: uniqueId + "_label", type: "text", value: () => data.label, oninput: (ev) => (data.label = ev.target.value) }),
+                ),
+                t.div(
+                    { className: "col-12" },
+                    t.label({ for: uniqueId + "_action" }, "Action"),
+                    app.components.select({
+                        id: uniqueId + "_action",
+                        value: () => data.action,
+                        options: NbxButtonActions,
+                        onchange: (sel) => (data.action = sel?.[0]?.value || "open_page"),
+                    }),
+                ),
+                data.action == "open_page" || data.action == "webhook"
+                    ? t.div(
+                          { className: "col-12" },
+                          t.label({ for: uniqueId + "_target" }, targetLabel()),
+                          t.input({ id: uniqueId + "_target", type: "text", value: () => data.target, oninput: (ev) => (data.target = ev.target.value) }),
+                      )
+                    : null,
+                data.action == "run_js"
+                    ? t.div(
+                          { className: "col-12" },
+                          t.label({ for: uniqueId + "_script" }, "Script (JS)"),
+                          t.textarea({
+                              id: uniqueId + "_script",
+                              rows: 8,
+                              spellcheck: "false",
+                              className: "code",
+                              placeholder: "$app.findCollectionByNameOrId('demo1'); // …",
+                              value: () => data.config?.script || "",
+                              oninput: (ev) => {
+                                  data.config = data.config || {};
+                                  data.config.script = ev.target.value;
+                              },
+                          }),
+                      )
+                    : null,
+                data.action == "webhook"
+                    ? t.div(
+                          { className: "col-12" },
+                          t.label({ for: uniqueId + "_method" }, "Method"),
+                          app.components.select({
+                              id: uniqueId + "_method",
+                              value: () => data.config?.method || "POST",
+                              options: ["POST", "GET", "PUT", "PATCH", "DELETE"].map((m) => ({ value: m, label: m })),
+                              onchange: (sel) => {
+                                  data.config = data.config || {};
+                                  data.config.method = sel?.[0]?.value || "POST";
+                              },
+                          }),
+                      )
+                    : null,
+                data.action == "webhook"
+                    ? t.div(
+                          { className: "col-12" },
+                          t.label({ for: uniqueId + "_body" }, "Body (optional)"),
+                          t.textarea({
+                              id: uniqueId + "_body",
+                              rows: 4,
+                              spellcheck: "false",
+                              className: "code",
+                              value: () => data.config?.body || "",
+                              oninput: (ev) => {
+                                  data.config = data.config || {};
+                                  data.config.body = ev.target.value;
+                              },
+                          }),
+                      )
+                    : null,
+            ),
+        ),
+        t.div(
+            { className: "modal-footer" },
+            t.button({ type: "button", className: "btn", onclick: () => app.modals.close(modal) }, "Cancel"),
+            t.button({ className: "btn primary", onclick: save }, data.isNew ? "Create" : "Save"),
+        ),
+    );
+
+    return new Promise((resolve) => {
+        resolveClose = resolve;
+        document.body.appendChild(modal);
+        app.modals.open(modal);
+    });
+}
 
 // add a "Workspace" entry to the top nav
 if (!app.store.headerLinks.find((l) => l.href == "#/workspace")) {

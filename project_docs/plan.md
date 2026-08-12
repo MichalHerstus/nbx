@@ -319,6 +319,7 @@ extension -> full app with all features.
   server-side HTML->PDF.
   **Status: DONE** (verified + tested).
 - **P4 — Buttons & scripting**: `open_page` (UI-only) then `run_js` via JSVM.
+  **Status: DONE** (verified + tested).
 - **P5 — Import/Export**: shared `svcs/io` engine -> CSV + **XLSX via excelize** (streaming,
   both directions) -> **SQL-table targets** (export-db/import-db, HTTP + CLI; auto-create table,
   `--replace`, optional `--create-collection`).

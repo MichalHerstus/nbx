@@ -16,6 +16,13 @@ const (
 	WidgetTypeSpacer = "spacer"
 )
 
+// NextBase button action types (plan F4).
+const (
+	ButtonActionOpenPage = "open_page"
+	ButtonActionRunJS    = "run_js"
+	ButtonActionWebhook  = "webhook"
+)
+
 // KPI aggregate operations.
 const (
 	AggregateCount = "count"
@@ -198,6 +205,73 @@ func UnmarshalNbxDashboardConfig(raw any) (*NbxDashboardConfig, error) {
 // NbxReportConfig with defaults applied.
 func UnmarshalNbxReportConfig(raw any) (*NbxReportConfig, error) {
 	var out NbxReportConfig
+	out.Default()
+	if raw == nil {
+		return &out, nil
+	}
+
+	switch v := raw.(type) {
+	case string:
+		if err := json.Unmarshal([]byte(v), &out); err != nil {
+			return nil, err
+		}
+	default:
+		b, err := json.Marshal(raw)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(b, &out); err != nil {
+			return nil, err
+		}
+	}
+
+	out.Default()
+	return &out, nil
+}
+
+// -------------------------------------------------------------------
+
+// NbxButtonConfig is the parsed content of the _buttons "config" field.
+//
+// The meaning of each field depends on the button "action" (plan F4):
+//   - open_page: no server-side config; handled entirely in the UI.
+//   - run_js:    Script holds the JS source executed through the JSVM.
+//   - webhook:   Method/Headers/Body/Timeout configure the outbound request
+//     sent to the button "target" URL.
+type NbxButtonConfig struct {
+	// Script is the JS source executed by a "run_js" button.
+	Script string `json:"script"`
+
+	// Method is the HTTP method for a "webhook" button (default "POST").
+	Method string `json:"method"`
+
+	// Headers are the request headers for a "webhook" button.
+	Headers map[string]string `json:"headers"`
+
+	// Body is the request body for a "webhook" button.
+	Body string `json:"body"`
+
+	// TimeoutSec is the webhook request timeout in seconds (default 30).
+	TimeoutSec int `json:"timeoutSec"`
+}
+
+// Default applies defaults to an empty button config.
+func (c *NbxButtonConfig) Default() {
+	if c.Method == "" {
+		c.Method = "POST"
+	}
+	if c.Headers == nil {
+		c.Headers = map[string]string{}
+	}
+	if c.TimeoutSec <= 0 {
+		c.TimeoutSec = 30
+	}
+}
+
+// UnmarshalNbxButtonConfig parses a button config JSON value into a
+// NbxButtonConfig with defaults applied.
+func UnmarshalNbxButtonConfig(raw any) (*NbxButtonConfig, error) {
+	var out NbxButtonConfig
 	out.Default()
 	if raw == nil {
 		return &out, nil

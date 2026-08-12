@@ -398,3 +398,25 @@
         height: 240px;
     }
 }
+
+/* ============================================================
+   NextBase (nbx) P4 — buttons
+   ============================================================ */
+
+.nbx-button-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.nbx-button-output {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.nbx-button-editor textarea.code {
+    font-family: var(--monospace);
+    font-size: 0.85rem;
+    min-height: 8rem;
+    resize: vertical;
+}
