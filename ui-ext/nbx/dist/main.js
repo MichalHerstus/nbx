@@ -1865,3 +1865,332 @@ app.routes.superuserOnly("#/workspace/view/{id}", async (route) => {
         app.components.nbxDatasView({ view, collection }),
     );
 });
+
+// ---------------------------------------------------------------------------
+// /ui — user-facing data UI
+//
+// The bundled admin SPA is also mounted at /ui. In this mode (path starts with
+// "/ui") we hide the superuser-only chrome and register user-facing routes:
+//   - #/ui          : views home (collections + their views, access-scoped)
+//   - #/ui/view/{id}: render a view (grid/kanban/calendar/gallery/form)
+// Record CRUD goes through the standard /api/collections/{c}/records API, so
+// per-collection CreateRule/UpdateRule/DeleteRule are honored automatically.
+// ---------------------------------------------------------------------------
+
+function nbxIsUiMode() {
+    return (window.location.pathname || "/").startsWith("/ui");
+}
+
+const NbxUiAuthCollection = "users"; // default; configurable in settings later
+
+function nbxUiAuthed() {
+    return !!(app.pb?.authStore?.isValid && app.pb?.authStore?.record?.id);
+}
+
+async function nbxUiFetch(urlOrPath, opts = {}) {
+    const headers = Object.assign({}, opts.headers || {});
+    if (app.pb?.authStore?.token) {
+        headers["Authorization"] = app.pb.authStore.token;
+    }
+    const res = await fetch(app.pb.buildURL(urlOrPath), Object.assign({}, opts, { headers }));
+    if (!res.ok) {
+        let msg = "Request failed (" + res.status + ")";
+        try {
+            const body = await res.json();
+            msg = body?.message || msg;
+        } catch {
+            /* ignore */
+        }
+        const err = new Error(msg);
+        err.status = res.status;
+        throw err;
+    }
+    return res.json();
+}
+
+// --- /ui login page (superuser or regular auth collection) -------------------
+window.app.components.nbxUiLogin = function(propsArg = {}) {
+    const props = store({ identity: "", password: "", authAs: "users", error: "", loading: false });
+
+    const watchers = app.utils.extendStore(props, propsArg);
+
+    function submit(ev) {
+        ev?.preventDefault();
+        if (props.loading) {
+            return;
+        }
+        props.loading = true;
+        props.error = "";
+        const collection = props.authAs == "superuser" ? "_superusers" : NbxUiAuthCollection;
+        app.pb
+            .collection(collection)
+            .authWithPassword(props.identity, props.password)
+            .then(() => {
+                props.loading = false;
+                window.location.hash = "#/ui";
+            })
+            .catch((err) => {
+                props.loading = false;
+                props.error = err?.message || "Invalid credentials.";
+            });
+    }
+
+    return t.div(
+        { className: "nbx-ui-login wrapper sm m-auto p-b-base" },
+        t.div({ className: "txt-center m-b-base" }, t.h5("NextBase")),
+        t.form(
+            { className: "card", onsubmit: submit },
+            t.div(
+                { className: "card-header" },
+                t.strong("Sign in to /ui"),
+            ),
+            t.div(
+                { className: "grid" },
+                t.div(
+                    { className: "col-12" },
+                    t.label({ className: "txt-sm" }, "Sign in as"),
+                    app.components.select({
+                        value: () => props.authAs,
+                        options: [
+                            { value: "users", label: "User" },
+                            { value: "superuser", label: "Superuser" },
+                        ],
+                        onchange: (sel) => (props.authAs = sel?.[0]?.value || "users"),
+                    }),
+                ),
+                t.div(
+                    { className: "col-12" },
+                    t.label({ className: "txt-sm" }, "Email"),
+                    t.input({
+                        type: "email",
+                        required: true,
+                        value: () => props.identity,
+                        oninput: (ev) => (props.identity = ev.target.value),
+                    }),
+                ),
+                t.div(
+                    { className: "col-12" },
+                    t.label({ className: "txt-sm" }, "Password"),
+                    t.input({
+                        type: "password",
+                        required: true,
+                        value: () => props.password,
+                        oninput: (ev) => (props.password = ev.target.value),
+                    }),
+                ),
+                props.error
+                    ? t.div({ className: "col-12" }, t.div({ className: "alert danger" }, props.error))
+                    : null,
+            ),
+            t.div(
+                { className: "form-actions" },
+                t.button(
+                    { className: () => `btn primary ${props.loading ? "loading" : ""}`, type: "submit", disabled: () => props.loading },
+                    "Sign in",
+                ),
+            ),
+        ),
+    );
+};
+
+// --- /ui views home ----------------------------------------------------------
+window.app.components.nbxUiHome = function(propsArg = {}) {
+    const props = store({ collections: [], loading: true, error: "" });
+
+    const watchers = app.utils.extendStore(props, propsArg);
+
+    async function load() {
+        if (!nbxUiAuthed()) {
+            props.error = "unauthorized";
+            props.loading = false;
+            return;
+        }
+        props.loading = true;
+        try {
+            const data = await nbxUiFetch("/api/nbx/ui/collections");
+            props.collections = data.collections || [];
+            props.error = "";
+        } catch (err) {
+            if (err?.status == 401 || err?.status == 403) {
+                app.pb.authStore.clear();
+                window.location.hash = "#/ui/login";
+                return;
+            }
+            props.error = err?.message || "Failed to load collections.";
+        } finally {
+            props.loading = false;
+        }
+    }
+
+    watch(() => app.pb.authStore.record?.id, () => load());
+    watchers?.push(watch(() => props.reloadKey, () => load()));
+
+    if (!nbxUiAuthed()) {
+        return t.div({ className: "page" });
+    }
+
+    return t.div(
+        { className: "page nbx-ui-home" },
+        t.div({ className: "page-header" }, t.h1("NextBase")),
+        () => {
+            if (props.loading) {
+                return t.div({ className: "block txt-center" }, t.span({ className: "loader lg" }));
+            }
+            if (props.error) {
+                return t.p({ className: "empty-state" }, props.error);
+            }
+            if (!props.collections.length) {
+                return t.p({ className: "empty-state" }, "No accessible collections or views yet.");
+            }
+            return t.div(
+                { className: "nbx-ui-topics" },
+                props.collections.map((col) =>
+                    t.div(
+                        { className: "card nbx-ui-topic" },
+                        t.div(
+                            { className: "card-header" },
+                            t.strong(col.name),
+                            t.span({ className: "muted" }, col.type),
+                        ),
+                        () => {
+                            if (!col.views?.length) {
+                                return t.div({ className: "txt-hint p-5" }, "No views defined.");
+                            }
+                            return t.div(
+                                { className: "list" },
+                                col.views.map((v) =>
+                                    t.a(
+                                        { className: "list-item", href: () => `#/ui/view/${v.id}` },
+                                        t.i({ className: nbxViewTypeIcon(v.type) }),
+                                        t.span({ className: "txt-ellipsis grow" }, v.label || v.id),
+                                        t.span({ className: "btn sm primary" }, "Open"),
+                                    ),
+                                ),
+                            );
+                        },
+                    ),
+                ),
+            );
+        },
+    );
+};
+
+// --- /ui single view ---------------------------------------------------------
+window.app.components.nbxUiViewPage = function(propsArg = {}) {
+    const props = store({ viewId: "", record: null, loading: true, error: "" });
+
+    const watchers = app.utils.extendStore(props, propsArg);
+
+    async function load() {
+        if (!nbxUiAuthed()) {
+            props.error = "unauthorized";
+            props.loading = false;
+            return;
+        }
+        props.loading = true;
+        try {
+            const data = await nbxUiFetch("/api/nbx/ui/view/" + props.viewId);
+            props.record = data;
+            props.error = "";
+        } catch (err) {
+            if (err?.status == 401 || err?.status == 403) {
+                app.pb.authStore.clear();
+                window.location.hash = "#/ui/login";
+                return;
+            }
+            props.error = err?.message || "Failed to load the view.";
+        } finally {
+            props.loading = false;
+        }
+    }
+
+    watch(() => props.viewId, () => load());
+    watchers?.push(watch(() => props.reloadKey, () => load()));
+
+    if (!nbxUiAuthed()) {
+        return t.div({ className: "page" });
+    }
+
+    return t.div(
+        { className: "page nbx-ui-view" },
+        () => {
+            if (props.loading) {
+                return t.div({ className: "block txt-center" }, t.span({ className: "loader lg" }));
+            }
+            if (props.error || !props.record) {
+                return t.p({ className: "empty-state" }, props.error || "View not found.");
+            }
+
+            const view = props.record.view || {};
+            const collection = props.record.collection;
+
+            app.store.title = props.record.label || collection?.name || "View";
+
+            const datasView = {
+                id: props.record.id,
+                label: props.record.label,
+                type: view.type || "grid",
+                sourceCollection: collection?.name || collection?.id,
+                config: view.config || {},
+            };
+
+            return t.div(
+                {},
+                t.div(
+                    { className: "page-header" },
+                    t.h1(props.record.label || collection?.name || "View"),
+                    t.div(
+                        { className: "page-actions" },
+                        t.button(
+                            { className: "btn", onclick: () => (window.location.hash = "#/ui") },
+                            "All views",
+                        ),
+                    ),
+                ),
+                app.components.nbxDatasView({ view: datasView, collection }),
+            );
+        },
+    );
+};
+
+if (nbxIsUiMode()) {
+    // hide the admin header in /ui mode
+    app.store.showHeader = false;
+
+    // The bundled admin SPA calls superuser-only loaders (loadCollections,
+    // loadSettings, loadOAuth2Providers) after any auth change. Those would
+    // 403 for regular /ui users, so override them as no-ops in /ui mode.
+    app.store.loadCollections = async () => {};
+    app.store.loadSettings = async () => {};
+    app.store.loadOAuth2Providers = async () => {};
+
+    // fallback route -> /ui home
+    app.routes.fallbackPath = "#/ui";
+
+    if (!app.store.headerLinks.length) {
+        app.store.headerLinks.push({ href: "#/ui", icon: "ri-home-3-line", label: "Home" });
+    }
+
+    app.routes.blank("#/ui/login", () => {
+        app.store.showHeader = false;
+        return app.components.nbxUiLogin({});
+    });
+
+    app.routes.blank("#/ui", async (route) => {
+        app.store.showHeader = false;
+        if (!nbxUiAuthed()) {
+            window.location.hash = "#/ui/login";
+            return t.div({ className: "page" });
+        }
+        return app.components.nbxUiHome({});
+    });
+
+    app.routes.blank("#/ui/view/{id}", async (route) => {
+        app.store.showHeader = false;
+        if (!nbxUiAuthed()) {
+            window.location.hash = "#/ui/login";
+            return t.div({ className: "page" });
+        }
+        return app.components.nbxUiViewPage({ viewId: route.params.id });
+    });
+}

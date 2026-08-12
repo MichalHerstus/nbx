@@ -4,8 +4,10 @@ package nbx
 
 import (
 	"github.com/pocketbase/pocketbase/apis"
+	"github.com/pocketbase/pocketbase/apis/nbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/hook"
+	"github.com/pocketbase/pocketbase/ui"
 	nbxui "github.com/pocketbase/pocketbase/ui-ext/nbx"
 )
 
@@ -35,6 +37,17 @@ func Register(app core.App) error {
 			if se.Router != nil {
 				nbxGroup := se.Router.Group("/api/nbx/buttons").Bind(apis.RequireSuperuserAuth())
 				nbxGroup.POST("/{id}/run", runButton(app))
+			}
+
+			// NextBase user-facing API (any authenticated user)
+			if se.Router != nil {
+				uiGroup := se.Router.Group("/api/nbx/ui").Bind(apis.RequireAuth())
+				nbx.RegisterUserApi(app, uiGroup)
+
+				// serve the admin SPA at /ui for the user-facing data UI
+				if ui.DistDirFS != nil && !se.Router.HasRoute("", "/ui") {
+					se.Router.GET("/ui/{path...}", apis.Static(ui.DistDirFS, true))
+				}
 			}
 
 			return se.Next()

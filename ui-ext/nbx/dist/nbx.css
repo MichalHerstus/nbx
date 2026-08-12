@@ -420,3 +420,45 @@
     min-height: 8rem;
     resize: vertical;
 }
+
+/* ============================================================
+   NextBase (nbx) — user-facing /ui
+   ============================================================ */
+
+.nbx-ui-login .card {
+    max-width: 26rem;
+    margin: 2rem auto;
+    padding: 1rem;
+}
+.nbx-ui-login .form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+.nbx-ui-login .card-header {
+    margin-bottom: 0.75rem;
+}
+
+.nbx-ui-topics {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 1rem;
+}
+.nbx-ui-topic .list-item {
+    text-decoration: none;
+    color: inherit;
+    border-radius: 4px;
+}
+.nbx-ui-topic a.list-item:hover {
+    background: var(--baseColor);
+}
+.nbx-ui-topic .card-header {
+    justify-content: space-between;
+}
+
+@media (width <= 600px) {
+    .nbx-ui-topics {
+        grid-template-columns: 1fr;
+    }
+}
