@@ -1,0 +1,230 @@
+/* NextBase (nbx) extension styles — views & workspace. */
+
+.nbx-dataview {
+    min-height: 50vh;
+}
+
+.nbx-view {
+    /* container queries for per-view responsiveness */
+    container-type: inline-size;
+}
+
+/* -- grid -- */
+.nbx-view-grid .card {
+    max-width: none;
+    width: 100%;
+}
+
+/* -- form -- */
+.nbx-view-form .form-card {
+    max-width: 46rem;
+    margin: 0 auto;
+}
+.nbx-view-form .form-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+    margin-top: 1rem;
+}
+
+/* -- kanban -- */
+.nbx-view-kanban .nbx-kanban-columns {
+    display: flex;
+    gap: 0.75rem;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+    -webkit-overflow-scrolling: touch;
+}
+.nbx-view-kanban .nbx-kanban-column {
+    min-width: 220px;
+    max-width: 280px;
+    flex: 0 0 auto;
+    background: var(--baseColor);
+    border: 1px solid var(--borderColor);
+    border-radius: 5px;
+    padding: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.nbx-view-kanban .nbx-kanban-column-head {
+    font-weight: 600;
+    padding: 0 0.25rem 0.5rem;
+    border-bottom: 1px solid var(--borderColor);
+    margin-bottom: 0.25rem;
+}
+.nbx-view-kanban .nbx-kanban-card {
+    background: var(--contentColor);
+    border: 1px solid var(--borderColor);
+    border-radius: 4px;
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+}
+.nbx-view-kanban .nbx-kanban-card:hover {
+    border-color: var(--accentColor);
+}
+
+/* -- calendar -- */
+.nbx-view-calendar .nbx-calendar {
+    background: var(--contentColor);
+    border: 1px solid var(--borderColor);
+    border-radius: 5px;
+    overflow: hidden;
+}
+.nbx-view-calendar .nbx-calendar-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--borderColor);
+}
+.nbx-view-calendar .nbx-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+}
+.nbx-view-calendar .nbx-calendar-head {
+    text-align: center;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--mutedColor);
+    padding: 0.35rem 0;
+    border-bottom: 1px solid var(--borderColor);
+    border-right: 1px solid var(--borderColor);
+}
+.nbx-view-calendar .nbx-calendar-cell {
+    min-height: 80px;
+    padding: 0.25rem;
+    border-bottom: 1px solid var(--borderColor);
+    border-right: 1px solid var(--borderColor);
+    position: relative;
+}
+.nbx-view-calendar .nbx-calendar-cell.empty {
+    background: var(--baseColor);
+}
+.nbx-view-calendar .nbx-calendar-daynum {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--mutedColor);
+    margin-bottom: 0.25rem;
+}
+.nbx-view-calendar .nbx-calendar-event {
+    background: color-mix(in srgb, var(--accentColor) 14%, transparent);
+    color: var(--accentColor);
+    border-radius: 3px;
+    padding: 0.1rem 0.35rem;
+    margin-bottom: 0.15rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+/* -- gallery -- */
+.nbx-view-gallery .nbx-gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 0.75rem;
+}
+.nbx-view-gallery .nbx-gallery-tile {
+    display: block;
+    background: var(--contentColor);
+    border: 1px solid var(--borderColor);
+    border-radius: 5px;
+    overflow: hidden;
+    text-decoration: none;
+    color: inherit;
+}
+.nbx-view-gallery .nbx-gallery-tile img {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+    display: block;
+}
+.nbx-view-gallery .nbx-gallery-placeholder {
+    aspect-ratio: 4 / 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--mutedColor);
+    background: var(--baseColor);
+    padding: 0.5rem;
+    text-align: center;
+}
+.nbx-view-gallery .nbx-gallery-caption {
+    padding: 0.4rem 0.5rem;
+    font-size: 0.85rem;
+    border-top: 1px solid var(--borderColor);
+}
+
+/* -- list item actions -- */
+.nbx-list-actions {
+    display: inline-flex;
+    gap: 0.25rem;
+}
+
+/* -- page header actions -- */
+.page-header {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.page-actions {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+
+/* -- view editor modal -- */
+.nbx-view-editor .form-grid {
+    display: grid;
+    gap: 0.75rem;
+}
+.nbx-view-editor .form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+.nbx-view-editor textarea.code {
+    font-family: var(--monospace);
+    font-size: 0.85rem;
+    min-height: 9rem;
+    resize: vertical;
+}
+
+/* -- responsive (F10 groundwork) -- */
+@media (width <= 900px) {
+    .nbx-view-calendar .nbx-calendar-cell {
+        min-height: 60px;
+    }
+}
+
+@media (width <= 600px) {
+    .nbx-view-kanban .nbx-kanban-column {
+        min-width: 180px;
+        max-width: 220px;
+    }
+    .nbx-view-gallery .nbx-gallery-grid {
+        grid-template-columns: repeat(auto-fill, minmax(42vw, 1fr));
+    }
+    .nbx-view-calendar .nbx-calendar-cell {
+        min-height: 0;
+        min-width: 40px;
+        overflow: hidden;
+    }
+    /* make the calendar horizontally swipeable on phones */
+    .nbx-view-calendar .nbx-calendar {
+        overflow-x: auto;
+    }
+    .nbx-view-calendar .nbx-calendar-grid {
+        min-width: 560px;
+    }
+}
+
+/* -- landscape small-screen (height-trimmed calendar header) -- */
+@media (width >= 320px) and (height <= 480px) {
+    .nbx-view-calendar .nbx-calendar-head {
+        padding: 0.15rem 0;
+    }
+    .nbx-view-calendar .nbx-calendar-cell {
+        min-height: 44px;
+    }
+}

@@ -44,6 +44,11 @@ func recordsList(e *core.RequestEvent) error {
 		return err
 	}
 
+	// external (read-only) datasource
+	if !collection.GetDataSource().IsLocal() {
+		return recordsListExternal(e, collection)
+	}
+
 	requestInfo, err := e.RequestInfo()
 	if err != nil {
 		return firstApiError(err, e.BadRequestError("", err))
@@ -152,6 +157,11 @@ func recordView(e *core.RequestEvent) error {
 		return err
 	}
 
+	// external (read-only) datasource
+	if !collection.GetDataSource().IsLocal() {
+		return recordsViewExternal(e, collection)
+	}
+
 	recordId := e.Request.PathValue("id")
 	if recordId == "" {
 		return e.NotFoundError("", nil)
@@ -211,6 +221,10 @@ func recordCreate(responseWriteAfterTx bool, optFinalizer func(data any) error) 
 		collection, err := e.App.FindCachedCollectionByNameOrId(e.Request.PathValue("collection"))
 		if err != nil || collection == nil {
 			return e.NotFoundError("Missing collection context.", err)
+		}
+
+		if err := forbidDatasourceWrite(e, collection); err != nil {
+			return err
 		}
 
 		if collection.IsView() {
@@ -396,6 +410,10 @@ func recordUpdate(responseWriteAfterTx bool, optFinalizer func(data any) error) 
 			return e.NotFoundError("Missing collection context.", err)
 		}
 
+		if err := forbidDatasourceWrite(e, collection); err != nil {
+			return err
+		}
+
 		if collection.IsView() {
 			return e.BadRequestError("Unsupported collection type.", nil)
 		}
@@ -533,6 +551,10 @@ func recordDelete(responseWriteAfterTx bool, optFinalizer func(data any) error) 
 		collection, err := e.App.FindCachedCollectionByNameOrId(e.Request.PathValue("collection"))
 		if err != nil || collection == nil {
 			return e.NotFoundError("Missing collection context.", err)
+		}
+
+		if err := forbidDatasourceWrite(e, collection); err != nil {
+			return err
 		}
 
 		if collection.IsView() {

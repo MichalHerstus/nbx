@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/pocketbase/pocketbase/apis/nbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/router"
 )
@@ -49,6 +50,9 @@ func NewRouter(app core.App) (*router.Router[*core.RequestEvent], error) {
 	bindRealtimeApi(app, apiGroup)
 	bindHealthApi(app, apiGroup)
 	bindSQLApi(app, apiGroup)
+
+	// NextBase API routes (superuser only)
+	nbx.Register(app, apiGroup.Group("/nbx").Bind(RequireSuperuserAuth()))
 
 	// UI routes
 	bindUIExtensions(app)

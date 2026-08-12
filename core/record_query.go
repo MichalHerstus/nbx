@@ -192,6 +192,15 @@ func dereference(v reflect.Value) reflect.Value {
 	return v
 }
 
+// RecordsFromNullStringMaps hydrates a slice of Record models from the
+// provided dbx rows data (mirrors the internal query Result hydration).
+//
+// It is exposed so external datasource executors (see the `core/datasource`
+// package) can reuse the same record hydration pipeline.
+func RecordsFromNullStringMaps(collection *Collection, rows []dbx.NullStringMap) ([]*Record, error) {
+	return newRecordsFromNullStringMaps(collection, rows)
+}
+
 func getCollectionByModelOrIdentifier(app App, collectionModelOrIdentifier any) (*Collection, error) {
 	switch c := collectionModelOrIdentifier.(type) {
 	case *Collection:
